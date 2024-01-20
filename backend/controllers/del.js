@@ -44,6 +44,7 @@ const save_info = (req, res) => {
         next();
     }
     let delivery = new Delivery(req.body);
+    console.log({ delivery });
     delivery.user = id;
     delivery.save()
         .then(res.status(201).json({ message: 'Delivery Details saved Successfully' }))
@@ -54,6 +55,7 @@ const save_info = (req, res) => {
 const change_info = (req, res) => {
     try {
         const id = req.params.id;
+
         
     } catch(error) {
 
@@ -62,7 +64,10 @@ const change_info = (req, res) => {
 }
 
 const delete_info = (req, res) => {
-    
+    const id = req.params.id;
+    Delivery.findByIdAndDelete(id)
+        .then(res.status(202).json({ message: 'Delivery details deleted successfully!' }))
+        .catch((err) => res.status(500).json({ error: 'Internal Server Error' }))
 }
 
 

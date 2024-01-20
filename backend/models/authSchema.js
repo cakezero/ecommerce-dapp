@@ -4,17 +4,17 @@ const { isEmail } = require('validator');
 const bcrypt = require('bcrypt');
 
 const userSchema = new Schema({
+    fullName: {
+        type: String,
+        required: [true, 'Enter your name'],
+        minlength: [5, 'Full Name should be atleast 5 characters']
+    },
     username: {
         type: String,
         required: [true, 'Username cannot be empty'],
         unique: true,
         lowercase: true,
         minlength: [4, 'Username should be atleast 4 characters']
-    },
-    fullName: {
-        type: String,
-        required: [true, 'Enter your name'],
-        minlength: [5, 'Full Name should be atleast 5 characters']
     },
     email: {
         type: String,
