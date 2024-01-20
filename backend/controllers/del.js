@@ -53,8 +53,8 @@ const save_info = (req, res) => {
 
 
 const change_info = (req, res) => {
+    const id = req.params.id;
     try {
-        const id = req.params.id;
 
         
     } catch(error) {
