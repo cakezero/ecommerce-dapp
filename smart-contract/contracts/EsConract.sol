@@ -15,12 +15,10 @@ contract EsContract is VRFConsumerBaseV2, ConfirmedOwner {
 
     bytes32 keyHash = 0x474e34a077df58807dbe9c96d3c009b23b3c6d0cce433e59bbf5b34f823bc56c;
     VRFCoordinatorV2Interface COORDINATOR;
+    mapping (address => sellerReqs) private s_reqs;
 
     mapping (address => bool) private isSeller;
-    mapping (address => uint256) private sender;
-    mapping (address => bool) private hasDelivered;
-    mapping (address => uint256) private sellerInfo;
-    mapping (address => uint256) sellerFunds;
+    mapping (address => uint256) private sellerFunds;
     mapping (uint => s_requests) public reqs;
 
     struct s_requests {
@@ -28,9 +26,15 @@ contract EsContract is VRFConsumerBaseV2, ConfirmedOwner {
         bool fulfilled;
         uint256[] randomWords;
     }
+    struct sellerReqs {
+        address sellerID;
+        bool isSeller;
+        bool hasDelivered;
+    }
 
     event Paid(address indexed reciever, string text, uint amount);
     event RequestFulfilled(uint256 reqId, uint256[] randomWords);
+    event D(uint id);
 
     constructor(uint64 _subsId) VRFConsumerBaseV2(0x8103B0A8A00be2DDC778e6e7eaa21791Cd364625) ConfirmedOwner(msg.sender) {
     	COORDINATOR = VRFCoordinatorV2Interface(0x8103B0A8A00be2DDC778e6e7eaa21791Cd364625);
@@ -57,9 +61,24 @@ contract EsContract is VRFConsumerBaseV2, ConfirmedOwner {
     function createSeller(address seller) external payable {
         // require(msg.value == sellerStake, 'You did not send the required amount');
 		uint id = generateId();
-        sender[msg.sender] = msg.value;
-        isSeller[seller] = true;
-        sellerInfo[seller] = id;
+        s_reqs[seller] = sellerReqs({
+            sellerID: id,
+            isSeller: true,
+            delivered: false
+        });
+        emit sellerId(id);
+    }
+
+    function deposit(uint amount, uint[] memory prices, address[] memory sellers) external payable {
+        require(msg.value == amount, 'You need to send the required amount');
+        for (uint i = 0; i < sellers.length; i++) {
+            require(isSeller[sellers[i]] == true, 'You are not a seller');
+            if (sellerFunds[sellers[i]]) {
+                sellerFunds[sellers[i]] += prices[i];
+            } else {
+                sellerFunds[sellers[i]] = prices[i];
+            }            
+        }
     }
 
     function delivered(address[] calldata sellers) external {
@@ -72,26 +91,17 @@ contract EsContract is VRFConsumerBaseV2, ConfirmedOwner {
         }
     }
 
-    function allocateFunds(address[] memory sellersAddy, uint[] memory funds) external {
-        for (uint i = 0; i < sellersAddy.length; i++) {
-            require(isSeller[sellersAddy[i]] == true, 'You are not a seller');
-            sellerFunds[sellersAddy[i]] = funds[i];
-        }
-    }
-
     function claim(uint _amount, uint256 id) external onlySeller {
-        require(sellerInfo[msg.sender] == id, 'You are not a seller');
-        require(hasDelivered[msg.sender] == true, 'You have not yet delivered the product');
+        require(s_reqs[msg.sender].sellerID == id, 'You are not a seller');
+        require(s_reqs[msg.sender].delivered == true, 'You have not yet delivered the product');
         require(sellerFunds[msg.sender] >= _amount, 'Insufficient Balance');
         uint amount = _amount * 2/100;
         _amount -= amount;
-        (bool sent, ) = msg.sender.call{ value: _amount }("");
+        (bool sent, ) = payable(msg.sender).call{ value: _amount }("");
         require(sent);
         string memory mess = 'has been paid';
-        emit Paid(msg.sender, mess, amount);
+        emit Paid(msg.sender, mess, _amount);
     }
-
-    receive() external payable {}
     
     modifier onlySeller() {
         require(isSeller[msg.sender] == true, 'You are not a dealer');
