@@ -14,9 +14,9 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: false }));
 
-mongoose.connect(DB_URL, { useNewUrlParser: true, useUnifiedTopology: true })
+mongoose.connect(DB_URL)
     .then(() => console.log("Connected to the DB"))
-    .then((result) => app.listen(PORT), console.log('port connected'))
+    .then(() => app.listen(PORT), console.log('port connected'))
     .catch((err) => console.log({ "Error": err }));
 
 

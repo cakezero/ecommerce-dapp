@@ -12,8 +12,8 @@ const createToken = (id) => {
 
 // Register User
 const register_post = async (req, res) => {
-    const { fullname, username, email, password } = req.body;
-    const user = await User.create({ fullname, username, email, password });
+    const { fullName, username, email, password } = req.body;
+    const user = await User.create({ fullName, username, email, password });
     try {
         const token = createToken(user._id);
         res.cookie('delivery_cookie', token, { httpOnly: true, maxAge: maxAge * 1000 });
