@@ -2,4 +2,3 @@ node_modules
 .env
 cache
 artifacts
-contracts/hu.sol
