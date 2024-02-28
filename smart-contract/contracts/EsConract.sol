@@ -6,16 +6,13 @@ import {ConfirmedOwner} from "@chainlink/contracts/src/v0.8/shared/access/Confir
 import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
 import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
 import {IERC20} from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.0/contracts/token/ERC20/IERC20.sol";
-import {FunctionsClient} from "@chainlink/contracts/src/v0.8/functions/dev/v1_0_0/FunctionsClient.sol";
-import {FunctionsRequest} from "@chainlink/contracts/src/v0.8/functions/dev/v1_0_0/libraries/FunctionsRequest.sol";
 
-contract EsContract is FunctionsClient, ConfirmedOwner {
-    using FunctionsRequest for FunctionsRequest.Request;
+contract EsContract is ConfirmedOwner {
 
     IRouterClient public immutable ccipRouter;
     IERC20 public immutable usdc;
-    address public immutable usdcContract;
-    uint64 public immutable chainSelector;
+    address public immutable usdcContract; // arbitrum usdc contract
+    uint64 public immutable chainSelector; // arbitrum chainlink chain selector
 
     IERC20 public linkToken;
 
@@ -42,7 +39,7 @@ contract EsContract is FunctionsClient, ConfirmedOwner {
     event MoneySent(address indexed reciever, uint amount);
     event Paid(bytes32indexed messageId, address indexed receiver, uint amount);
 
-    constructor(address _ccipRouter, address _usdc, address _functionsRouter, uint64 _chainSelector, address _linkToken) FunctionsClient(_functionsRouter) ConfirmedOwner(msg.sender) {
+    constructor(address _ccipRouter, address _usdc, address _functionsRouter, uint64 _chainSelector, address _linkToken) ConfirmedOwner(msg.sender) {
         usdc = IERC20(_usdc);
         ccipRouter = IRouterClient(_ccipRouter);
         usdcContract = _usdc;
@@ -77,15 +74,6 @@ contract EsContract is FunctionsClient, ConfirmedOwner {
             prices: prices,
         });
         return id;
-    }
-
-    function requestPayment(bytes memory request, uint64 subscriptionId, uint32 gasLimit, bytes32 donID) external returns (bytes32 messageId) {
-       messageId = _sendRequest(request, subscriptionId, gasLimit, donID)
-    }
-
-    function fulfillRequest(bytes32 requestId, bytes memory response, bytes memory err) internal override {
-        string memory delivered = abi.decode(response);
-        
     }
 
     function PayMerchant(bytes8 id) internal {
