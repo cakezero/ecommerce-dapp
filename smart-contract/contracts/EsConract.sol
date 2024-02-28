@@ -1,100 +1,132 @@
-// SPDX-License-Identifier: Unlicensed
+// SPDX-License-Identifier: MIT
 
 pragma solidity ^0.8.20;
 
-import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
-import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
-import "@chainlink/contracts/src/v0.8/ConfirmedOwner.sol";
+import {ConfirmedOwner} from "@chainlink/contracts/src/v0.8/shared/access/ConfirmedOwner.sol";
+import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
+import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
+import {IERC20} from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.0/contracts/token/ERC20/IERC20.sol";
+import {FunctionsClient} from "@chainlink/contracts/src/v0.8/functions/dev/v1_0_0/FunctionsClient.sol";
+import {FunctionsRequest} from "@chainlink/contracts/src/v0.8/functions/dev/v1_0_0/libraries/FunctionsRequest.sol";
 
-contract EsContract is VRFConsumerBaseV2, ConfirmedOwner {
-    // uint public sellerStake = 0.25 * (10 ** 18);
-	uint64 subsId;
-	uint32 callbackGasLimit = 100000;
-	uint8 numWords = 1;
-	uint8 confirmations = 5;
+contract EsContract is FunctionsClient, ConfirmedOwner {
+    using FunctionsRequest for FunctionsRequest.Request;
 
-    bytes32 keyHash = 0x474e34a077df58807dbe9c96d3c009b23b3c6d0cce433e59bbf5b34f823bc56c;
-    VRFCoordinatorV2Interface COORDINATOR;
+    IRouterClient public immutable ccipRouter;
+    IERC20 public immutable usdc;
+    address public immutable usdcContract;
+    uint64 public immutable chainSelector;
 
-    mapping (address => bool) private isSeller;
-    mapping (address => uint256) private sender;
-    mapping (address => bool) private hasDelivered;
-    mapping (address => uint256) private sellerInfo;
-    mapping (address => uint256) sellerFunds;
-    mapping (uint => s_requests) public reqs;
+    IERC20 public linkToken;
 
-    struct s_requests {
-        bool exists;
-        bool fulfilled;
-        uint256[] randomWords;
+    error NotEnoughFeesForGas(uint balance, uint fees);
+    error NothingToWithdraw();
+    error FailedToWithdraw();
+    error InvalidAddress();
+    error NotAMerchant(address phony);
+    error SendRequiredAmount();
+    error NotYetDelivered();
+
+    mapping(address => uint256) internal commission;
+    mapping(address => bool) public isMerchant;
+    mapping(bytes8 => order) external Order;
+
+    struct order {
+        address[] merchants;
+        uint[] prices;
     }
 
-    event Paid(address indexed reciever, string text, uint amount);
-    event RequestFulfilled(uint256 reqId, uint256[] randomWords);
+    event CommissionPaid(address indexed receiver, uint amount);
+    event MerchantCreated(address indexed merchant);
+    event MerchantRemoved(address indexed merchant);
+    event MoneySent(address indexed reciever, uint amount);
+    event Paid(bytes32indexed messageId, address indexed receiver, uint amount);
 
-    constructor(uint64 _subsId) VRFConsumerBaseV2(0x8103B0A8A00be2DDC778e6e7eaa21791Cd364625) ConfirmedOwner(msg.sender) {
-    	COORDINATOR = VRFCoordinatorV2Interface(0x8103B0A8A00be2DDC778e6e7eaa21791Cd364625);
-        subsId = _subsId;
+    constructor(address _ccipRouter, address _usdc, address _functionsRouter, uint64 _chainSelector, address _linkToken) FunctionsClient(_functionsRouter) ConfirmedOwner(msg.sender) {
+        usdc = IERC20(_usdc);
+        ccipRouter = IRouterClient(_ccipRouter);
+        usdcContract = _usdc;
+        linkToken = IERC20(_linkToken);
+        chainSelector = _chainSelector
     }
 
-	function generateId() internal returns (uint256 reqId) {
-		reqId = COORDINATOR.requestRandomWords(keyHash, subsId, confirmations, callbackGasLimit, numWords);
-        reqs[reqId] = s_requests({
-            randomWords: new uint256[](0),
-            fulfilled: false,
-            exists: true
+    function generateId() internal view returns (bytes8 id) {
+        bytes32 blockHash = blockhash(block.number - 1);
+        id = bytes8(keccak256(abi.encodePacked(blockHash)));
+        return id;
+    }
+
+    function CreateMerchant() external {
+        isMerchant[msg.sender] = true;
+        emit MerchantCreated(msg.sender);
+    }
+
+    function deposit(
+        uint amount,
+        uint[] memory prices,
+        address[] memory _merchants
+    ) external payable returns (bytes8 id) {
+        id = generateId();
+        if (msg.value != amount) revert SendRequiredAmount();
+        for (uint i = 0; i < _merchants.length; i++) {
+            if (isMerchant[_merchants[i]]) revert NotAMerchant(_merchants[i]);
+            if (_merchants[i] != address(0)) revert InvalidAddress();
+        }
+        Order[id] = order({
+            merchants: _merchants,
+            prices: prices,
         });
-		return reqId;
-	}
-
-    function fulfillRandomWords(uint256 reqId, uint256[] memory randomWords) internal override {
-        require(reqs[reqId].exists == true, 'Id not found');
-        reqs[reqId].fulfilled = true;
-        reqs[reqId].randomWords = randomWords;
-        emit RequestFulfilled(reqId, randomWords);
+        return id;
     }
 
-    function createSeller(address seller) external payable {
-        // require(msg.value == sellerStake, 'You did not send the required amount');
-		uint id = generateId();
-        sender[msg.sender] = msg.value;
-        isSeller[seller] = true;
-        sellerInfo[seller] = id;
+    function requestPayment(bytes memory request, uint64 subscriptionId, uint32 gasLimit, bytes32 donID) external returns (bytes32 messageId) {
+       messageId = _sendRequest(request, subscriptionId, gasLimit, donID)
     }
 
-    function delivered(address[] calldata sellers) external {
-        for (uint i = 0; i < sellers.length; i++) {
-            if (isSeller[sellers[i]] == true) {
-                hasDelivered[sellers[i]] = true;
-            } else {
-                revert('Address is not a Seller');
-            }
+    function fulfillRequest(bytes32 requestId, bytes memory response, bytes memory err) internal override {
+        string memory delivered = abi.decode(response);
+        
+    }
+
+    function PayMerchant(bytes8 id) internal {
+        orderDetails = order[id];
+        for (uint i = 0; i < orderDetails.merchants; i++) {
+            uint _amount = orderDetails.prices[i] * 1/100; // Takes 1% for commission 
+            orderDetails.prices[i] -= _amount;
+            Client.EVM2AnyMessage memory evm2AnyMessage = _buildCCIPMessage(
+                receiver: orderDetails.merchants[i],
+                token: usdcContract;
+                amount: orderDetails.prices[i],
+                feeToken: address(linkToken) // uses Link
+            );
+            uint256 fees = ccipRouter.getFee(chainSelector, evm2AnyMessage);
+            if (fees > linkToken.balanceOf(address(this))) revert NotEnoughFeesForGas(linkToken.balanceOf(address(this)), fees);
+
+            linkToken.approve(address(ccipRouter), fees);
+
+            usdc.approve(address(ccipRouter), orderDetails.prices[i]);
+
+            bytes32 messageId = ccipRouter.ccipSend(chainSelector, evm2AnyMessage);
+
+            emit Paid(messageId, receorderDetails.merchants[i], orderDetails.prices[i]);
         }
     }
 
-    function allocateFunds(address[] memory sellersAddy, uint[] memory funds) external {
-        for (uint i = 0; i < sellersAddy.length; i++) {
-            require(isSeller[sellersAddy[i]] == true, 'You are not a seller');
-            sellerFunds[sellersAddy[i]] = funds[i];
-        }
+    function checkCommission() external view onlyOwner returns (uint amount) {
+        amount = commission[msg.sender];
     }
 
-    function claim(uint _amount, uint256 id) external onlySeller {
-        require(sellerInfo[msg.sender] == id, 'You are not a seller');
-        require(hasDelivered[msg.sender] == true, 'You have not yet delivered the product');
-        require(sellerFunds[msg.sender] >= _amount, 'Insufficient Balance');
-        uint amount = _amount * 2/100;
-        _amount -= amount;
-        (bool sent, ) = msg.sender.call{ value: _amount }("");
+    function withdrawCommission() external onlyOwner {
+        uint amount = commission[msg.sender];
+        (bool sent, ) = payable(msg.sender).call{value: amount}("");
         require(sent);
-        string memory mess = 'has been paid';
-        emit Paid(msg.sender, mess, amount);
+        emit CommissionPaid(msg.sender, amount);
     }
 
     receive() external payable {}
-    
-    modifier onlySeller() {
-        require(isSeller[msg.sender] == true, 'You are not a dealer');
+
+    modifier onlyMerchant() {
+        require(isMerchant[msg.sender], "You are not a merchant");
         _;
     }
 }
