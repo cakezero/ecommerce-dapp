@@ -11,8 +11,8 @@ contract EsContract is ConfirmedOwner {
 
     IRouterClient public immutable ccipRouter;
     IERC20 public immutable usdc;
-    address public immutable usdcContract; // arbitrum usdc contract
-    uint64 public immutable chainSelector; // arbitrum chainlink chain selector
+    address public immutable usdcContract;
+    uint64 public immutable chainSelector;
 
     IERC20 public linkToken;
 
@@ -22,13 +22,12 @@ contract EsContract is ConfirmedOwner {
     error InvalidAddress();
     error NotAMerchant(address phony);
     error SendRequiredAmount();
-    error NotYetDelivered();
 
     mapping(address => uint256) internal commission;
     mapping(address => bool) public isMerchant;
-    mapping(bytes8 => order) external Order;
+    mapping(bytes8 => Order) external order;
 
-    struct order {
+    struct Order {
         address[] merchants;
         uint[] prices;
     }
@@ -39,7 +38,7 @@ contract EsContract is ConfirmedOwner {
     event MoneySent(address indexed reciever, uint amount);
     event Paid(bytes32indexed messageId, address indexed receiver, uint amount);
 
-    constructor(address _ccipRouter, address _usdc, address _functionsRouter, uint64 _chainSelector, address _linkToken) ConfirmedOwner(msg.sender) {
+    constructor(address _ccipRouter, address _usdc, uint64 _chainSelector, address _linkToken) ConfirmedOwner(msg.sender) {
         usdc = IERC20(_usdc);
         ccipRouter = IRouterClient(_ccipRouter);
         usdcContract = _usdc;
@@ -67,17 +66,18 @@ contract EsContract is ConfirmedOwner {
         if (msg.value != amount) revert SendRequiredAmount();
         for (uint i = 0; i < _merchants.length; i++) {
             if (isMerchant[_merchants[i]]) revert NotAMerchant(_merchants[i]);
-            if (_merchants[i] != address(0)) revert InvalidAddress();
+            if (_merchants[i] == address(0)) revert InvalidAddress();
         }
-        Order[id] = order({
+        order[id] = Order({
             merchants: _merchants,
-            prices: prices,
+            prices: prices
         });
         return id;
     }
 
-    function PayMerchant(bytes8 id) internal {
-        orderDetails = order[id];
+    function PayMerchant(bytes8 id) external {
+        Order storage orderDetails = order[id];
+        delete order[id];
         for (uint i = 0; i < orderDetails.merchants; i++) {
             uint _amount = orderDetails.prices[i] * 1/100; // Takes 1% for commission 
             orderDetails.prices[i] -= _amount;
@@ -85,7 +85,7 @@ contract EsContract is ConfirmedOwner {
                 receiver: orderDetails.merchants[i],
                 token: usdcContract;
                 amount: orderDetails.prices[i],
-                feeToken: address(linkToken) // uses Link
+                feeToken: address(linkToken) // uses Link for gas
             );
             uint256 fees = ccipRouter.getFee(chainSelector, evm2AnyMessage);
             if (fees > linkToken.balanceOf(address(this))) revert NotEnoughFeesForGas(linkToken.balanceOf(address(this)), fees);
@@ -100,14 +100,15 @@ contract EsContract is ConfirmedOwner {
         }
     }
 
-    function checkCommission() external view onlyOwner returns (uint amount) {
+    function checkCommission() public view onlyOwner returns (uint amount) {
         amount = commission[msg.sender];
     }
 
     function withdrawCommission() external onlyOwner {
         uint amount = commission[msg.sender];
-        (bool sent, ) = payable(msg.sender).call{value: amount}("");
-        require(sent);
+        if (amount == 0) revert NothingToWithdraw();
+        (bool sent) = payable(msg.sender).call{value: amount}("");
+        if (!sent) revert FailedToWithdraw();
         emit CommissionPaid(msg.sender, amount);
     }
 
