@@ -1,11 +1,21 @@
-const { expect }  = require("chai");
-const { ethers } = require("hardhat");
+const { expect } = require("chai");
+const hre = require("hardhat");
 
-describe("EsContract", function() {
-    it("should generateId", async function() {
-        const Crow = await ethers.getContractFactory("EsContract");
-        const crow = await Crow.deploy();
+const { CCIP_ROUTER, CHAIN_SELECTOR, USDC_CONTRACT, LINK_TOKEN } = process.env;
 
-        expect(crow.generateId()).to.equal(1);
-    });
-})
+describe("EsContract", function () {
+  it("should generateId", async function () {
+    const crow = await ethers.deployContract(
+      "EsContract",
+      CCIP_ROUTER,
+      USDC_CONTRACT,
+      CHAIN_SELECTOR,
+      LINK_TOKEN
+    );
+    const id = crow.generateId();
+
+   console.log(id);
+
+    expect(id).to.equal(1);
+  });
+});
