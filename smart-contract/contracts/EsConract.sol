@@ -14,7 +14,7 @@ contract EsContract is ConfirmedOwner {
     address public immutable usdcContract;
     uint64 public immutable chainSelector;
 
-    IERC20 public linkToken;
+    IERC20 public immutable linkToken;
 
     error NotEnoughFeesForGas(uint balance, uint fees);
     error NothingToWithdraw();
@@ -25,7 +25,7 @@ contract EsContract is ConfirmedOwner {
 
     mapping(address => uint256) internal commission;
     mapping(address => bool) public isMerchant;
-    mapping(bytes8 => Order) external order;
+    mapping(bytes8 => Order) internal order;
 
     struct Order {
         address[] merchants;
@@ -36,14 +36,14 @@ contract EsContract is ConfirmedOwner {
     event MerchantCreated(address indexed merchant);
     event MerchantRemoved(address indexed merchant);
     event MoneySent(address indexed reciever, uint amount);
-    event Paid(bytes32indexed messageId, address indexed receiver, uint amount);
+    event Paid(bytes32 indexed messageId, address indexed receiver, uint amount);
 
     constructor(address _ccipRouter, address _usdc, uint64 _chainSelector, address _linkToken) ConfirmedOwner(msg.sender) {
         usdc = IERC20(_usdc);
         ccipRouter = IRouterClient(_ccipRouter);
         usdcContract = _usdc;
         linkToken = IERC20(_linkToken);
-        chainSelector = _chainSelector
+        chainSelector = _chainSelector;
     }
 
     function generateId() internal view returns (bytes8 id) {
@@ -76,19 +76,32 @@ contract EsContract is ConfirmedOwner {
     }
 
     function PayMerchant(bytes8 id) external {
+
         Order storage orderDetails = order[id];
         delete order[id];
-        for (uint i = 0; i < orderDetails.merchants; i++) {
+
+        for (uint i = 0; i < orderDetails.merchants.length; i++) {
             uint _amount = orderDetails.prices[i] * 1/100; // Takes 1% for commission 
             orderDetails.prices[i] -= _amount;
-            Client.EVM2AnyMessage memory evm2AnyMessage = _buildCCIPMessage(
-                receiver: orderDetails.merchants[i],
-                token: usdcContract;
-                amount: orderDetails.prices[i],
+
+            Client.EVMTokenAmount[] memory tokenAmounts = new Client.EVMTokenAmount[](1);
+            Client.EVMTokenAmount memory tokenAmount = Client.EVMTokenAmount({
+                token: usdcContract,
+                amount:  orderDetails.prices[i]
+            });
+            tokenAmounts[0] = tokenAmount;
+
+            Client.EVM2AnyMessage memory evm2AnyMessage = Client.EVM2AnyMessage({
+                receiver: abi.encode(orderDetails.merchants[i]),
+                tokenAmounts: tokenAmounts,
+                data: "",
+                extraArgs: "",
                 feeToken: address(linkToken) // uses Link for gas
-            );
+            });
             uint256 fees = ccipRouter.getFee(chainSelector, evm2AnyMessage);
-            if (fees > linkToken.balanceOf(address(this))) revert NotEnoughFeesForGas(linkToken.balanceOf(address(this)), fees);
+
+            if (fees > linkToken.balanceOf(address(this))) 
+                revert NotEnoughFeesForGas(linkToken.balanceOf(address(this)), fees);
 
             linkToken.approve(address(ccipRouter), fees);
 
@@ -96,7 +109,7 @@ contract EsContract is ConfirmedOwner {
 
             bytes32 messageId = ccipRouter.ccipSend(chainSelector, evm2AnyMessage);
 
-            emit Paid(messageId, receorderDetails.merchants[i], orderDetails.prices[i]);
+            emit Paid(messageId, orderDetails.merchants[i], orderDetails.prices[i]);
         }
     }
 
@@ -107,7 +120,7 @@ contract EsContract is ConfirmedOwner {
     function withdrawCommission() external onlyOwner {
         uint amount = commission[msg.sender];
         if (amount == 0) revert NothingToWithdraw();
-        (bool sent) = payable(msg.sender).call{value: amount}("");
+        (bool sent, ) = payable(msg.sender).call{value: amount}("");
         if (!sent) revert FailedToWithdraw();
         emit CommissionPaid(msg.sender, amount);
     }
