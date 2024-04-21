@@ -10,14 +10,14 @@ This project is aimed at facilitating a secure and automated transactions betwee
 
 - SMART CONTRACT
 
-* Merchant creation.
+  * Merchant creation.
 
-* The contract holds funds sent from a user (buyer) who purchases a product from the platform.
+  * The contract holds funds sent from a user (buyer) who purchases a product from the platform.
 
-* The contract makes use of chainlink's Cross-Chain Interoperability Protocol (CCIP) to send the funds from the contract to the respective merchant wallet in their respective networks(ETH, MATIC, AVAX, ETC...).
+  * The contract makes use of chainlink's Cross-Chain Interoperability Protocol (CCIP) to send the funds from the contract to the respective merchant wallet to their respective networks(ETH, MATIC, AVAX, ETC...).
 
-* The contract takes 0.1% commission fee from the merchant.
+  * The contract takes 0.1% commission fee from the merchant.
 
 - BACKEND
 
-* The backend is used for authentication, delivery info (buyer), storing of the user product (merchant), creation of user profile(buyer and seller).
+  * The backend is used for authentication, delivery info (buyer), storing of the user product (merchant), creation of user profile(buyer and seller).
