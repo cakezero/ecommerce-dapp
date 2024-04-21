@@ -118,7 +118,7 @@ contract EsContract is ConfirmedOwner {
     }
 
     function withdrawCommission() external onlyOwner {
-        uint amount = commission[msg.sender];
+        uint amount = checkCommission();
         if (amount == 0) revert NothingToWithdraw();
         (bool sent, ) = payable(msg.sender).call{value: amount}("");
         if (!sent) revert FailedToWithdraw();
