@@ -16,26 +16,28 @@ contract EsContract is ConfirmedOwner {
 
     IERC20 public immutable linkToken;
 
-    error NotEnoughFeesForGas(uint balance, uint fees);
-    error NothingToWithdraw();
     error FailedToWithdraw();
     error InvalidAddress();
-    error NotAMerchant(address phony);
+    error NotASeller(address phony);
+    error NotEnoughFeesForGas(uint balance, uint fees);
+    error NothingToWithdraw();
+    error OrderHasBeenFulfilled();
     error SendRequiredAmount();
 
     mapping(address => uint256) internal commission;
-    mapping(address => bool) public isMerchant;
+    mapping(address => bool) public isSeller;
     mapping(bytes8 => Order) internal order;
 
     struct Order {
-        address[] merchants;
+        address[] sellers;
         uint[] prices;
     }
 
     event CommissionPaid(address indexed receiver, uint amount);
-    event MerchantCreated(address indexed merchant);
-    event MerchantRemoved(address indexed merchant);
+    event SellerCreated(address indexed seller);
+    event SellerRemoved(address indexed seller);
     event MoneySent(address indexed reciever, uint amount);
+    event MoneyDeposited(address indexed depositor, uint amount);
     event Paid(bytes32 indexed messageId, address indexed receiver, uint amount);
 
     constructor(address _ccipRouter, address _usdc, uint64 _chainSelector, address _linkToken) ConfirmedOwner(msg.sender) {
@@ -46,41 +48,37 @@ contract EsContract is ConfirmedOwner {
         chainSelector = _chainSelector;
     }
 
-    function generateId() internal view returns (bytes8 id) {
-        bytes32 blockHash = blockhash(block.number - 1);
-        id = bytes8(keccak256(abi.encodePacked(blockHash)));
-        return id;
-    }
-
-    function CreateMerchant() external {
-        isMerchant[msg.sender] = true;
-        emit MerchantCreated(msg.sender);
+    function CreateSeller() external onlyOwner {
+        isSeller[msg.sender] = true;
+        emit SellerCreated(msg.sender);
     }
 
     function deposit(
         uint amount,
         uint[] memory prices,
-        address[] memory _merchants
-    ) external payable returns (bytes8 id) {
-        id = generateId();
+        address[] memory _sellers,
+        string calldata orderId
+    ) external payable {
         if (msg.value != amount) revert SendRequiredAmount();
-        for (uint i = 0; i < _merchants.length; i++) {
-            if (isMerchant[_merchants[i]]) revert NotAMerchant(_merchants[i]);
-            if (_merchants[i] == address(0)) revert InvalidAddress();
+        for (uint i = 0; i < _sellers.length; i++) {
+            if (isSeller[_sellers[i]]) revert NotASeller(_sellers[i]);
+            if (_sellers[i] == address(0)) revert InvalidAddress();
         }
-        order[id] = Order({
-            merchants: _merchants,
+        order[orderId] = Order({
+            sellers: _sellers,
             prices: prices
         });
-        return id;
+
+        payConfirmed[orderId] = false;
+        emit MoneyDeposited(msg.sender, amount);
     }
 
-    function PayMerchant(bytes8 id) external {
+    function PaySeller(string calldata id) external {
+        if (payConfirmed[id)) revert OrderHasBeenFulfilled();
 
         Order storage orderDetails = order[id];
-        delete order[id];
 
-        for (uint i = 0; i < orderDetails.merchants.length; i++) {
+        for (uint i = 0; i < orderDetails.sellers.length; i++) {
             uint _amount = orderDetails.prices[i] * 1/100; // Takes 1% for commission 
             orderDetails.prices[i] -= _amount;
 
@@ -92,7 +90,7 @@ contract EsContract is ConfirmedOwner {
             tokenAmounts[0] = tokenAmount;
 
             Client.EVM2AnyMessage memory evm2AnyMessage = Client.EVM2AnyMessage({
-                receiver: abi.encode(orderDetails.merchants[i]),
+                receiver: abi.encode(orderDetails.sellers[i]),
                 tokenAmounts: tokenAmounts,
                 data: "",
                 extraArgs: "",
@@ -109,7 +107,9 @@ contract EsContract is ConfirmedOwner {
 
             bytes32 messageId = ccipRouter.ccipSend(chainSelector, evm2AnyMessage);
 
-            emit Paid(messageId, orderDetails.merchants[i], orderDetails.prices[i]);
+            payConfirmed[id] = true;
+
+            emit Paid(messageId, orderDetails.sellers[i], orderDetails.prices[i]);
         }
     }
 
@@ -127,8 +127,8 @@ contract EsContract is ConfirmedOwner {
 
     receive() external payable {}
 
-    modifier onlyMerchant() {
-        require(isMerchant[msg.sender], "You are not a merchant");
+    modifier onlySeller() {
+        require(isSeller[msg.sender], "You are not a seller");
         _;
     }
 }
