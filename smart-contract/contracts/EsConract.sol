@@ -26,7 +26,8 @@ contract EsContract is ConfirmedOwner {
 
     mapping(address => uint256) internal commission;
     mapping(address => bool) public isSeller;
-    mapping(bytes8 => Order) internal order;
+    mapping(string => bool) external payConfirmed;
+    mapping(string => Order) internal order;
 
     struct Order {
         address[] sellers;
