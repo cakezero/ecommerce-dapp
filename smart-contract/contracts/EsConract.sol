@@ -73,7 +73,7 @@ contract EsContract is ConfirmedOwner {
         emit MoneyDeposited(msg.sender, amount);
     }
 
-    function PaySeller(string calldata id) external {
+    function PaySeller(string calldata id) external onlyOwner {
         if (payConfirmed[id)) revert OrderHasBeenFulfilled();
 
         Order storage orderDetails = order[id];
